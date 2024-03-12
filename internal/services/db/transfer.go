@@ -142,23 +142,26 @@ func (db *TransferDB) AddTransfers(tx []*indexer.Transfer) error {
 
 	for _, t := range tx {
 		// insert transfer on conflict update
+
+		// TODO: Add update on conflict
+
+		// UPDATE t_transfers_%s
+		// SET
+		// 	tx_hash = $2,
+		// 	token_id = $3,
+		// 	created_at = $4,
+		// 	from_to_addr = $5,
+		// 	from_addr = $6,
+		// 	to_addr = $7,
+		// 	nonce = $8,
+		// 	value = $9,
+		// 	data = COALESCE($10, t_transfers_%s.data),
+		// 	status = $11
+
 		_, err := dbtx.Exec(fmt.Sprintf(`
 			INSERT OR IGNORE INTO t_transfers_%s (hash, tx_hash, token_id, created_at, from_to_addr, from_addr, to_addr, nonce, value, data, status)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
-			
-			UPDATE t_transfers_%s
-			SET
-				tx_hash = $2,
-				token_id = $3,
-				created_at = $4,
-				from_to_addr = $5,
-				from_addr = $6,
-				to_addr = $7,
-				nonce = $8,
-				value = $9,
-				data = COALESCE($10, t_transfers_%s.data),
-				status = $11;
-			`, db.suffix, db.suffix, db.suffix), t.Hash, t.TxHash, t.TokenID, t.CreatedAt, t.CombineFromTo(), t.From, t.To, t.Nonce, t.Value.String(), t.Data, t.Status)
+			`, db.suffix), t.Hash, t.TxHash, t.TokenID, t.CreatedAt, t.CombineFromTo(), t.From, t.To, t.Nonce, t.Value.String(), t.Data, t.Status)
 		if err != nil {
 			return dbtx.Rollback()
 		}
@@ -224,7 +227,7 @@ func (db *TransferDB) ReconcileTxHash(tx *indexer.Transfer) error {
 	INSERT OR IGNORE INTO t_transfers_%s (hash, tx_hash, token_id, created_at, from_to_addr, from_addr, to_addr, nonce, value, data, status)
 	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'success');
 
-	UPDATE t_transfers_%s SET  
+	UPDATE t_transfers_%s SET
 		tx_hash = $1,
 		token_id = $2,
 		created_at = $3,
@@ -536,7 +539,7 @@ func (db *TransferDB) UpdateTransfersWithDB(txs []*indexer.Transfer) ([]*indexer
 		)
 		SELECT tx.hash, tx_hash, token_id, created_at, from_to_addr, from_addr, to_addr, nonce, value, data, status
 		FROM t_transfers_%s tx
-		JOIN b 
+		JOIN b
 		ON tx.hash = b.hash;
 		`, hashStr, db.suffix))
 	if err != nil {
