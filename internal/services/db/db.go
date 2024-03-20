@@ -30,6 +30,7 @@ type DB struct {
 	SponsorDB   *SponsorDB
 	TransferDB  map[string]*TransferDB
 	PushTokenDB map[string]*PushTokenDB
+	ListenersDB map[string]*ListenersDB
 }
 
 // NewDB instantiates a new DB
@@ -138,6 +139,7 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 
 	txdb := map[string]*TransferDB{}
 	ptdb := map[string]*PushTokenDB{}
+	lsdb := map[string]*ListenersDB{}
 
 	evs, err := eventDB.GetEvents()
 	if err != nil {
@@ -203,10 +205,38 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 				return nil, err
 			}
 		}
+
+		log.Default().Println("creating listeners db for: ", name)
+
+		lsdb[name], err = NewListenersDB(db, db, name)
+		if err != nil {
+			return nil, err
+		}
+
+		// check if db exists before opening, since we use rwc mode
+		exists, err = d.ListenersTableExists(name)
+		if err != nil {
+			return nil, err
+		}
+
+		if !exists {
+			// create table
+			err = lsdb[name].CreateListenersTable()
+			if err != nil {
+				return nil, err
+			}
+
+			// create indexes
+			err = lsdb[name].CreateListenersTableIndexes()
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	d.TransferDB = txdb
 	d.PushTokenDB = ptdb
+	d.ListenersDB = lsdb
 
 	return d, nil
 }
@@ -271,6 +301,25 @@ func (db *DB) TransferTableExists(suffix string) (bool, error) {
 // PushTokenTableExists checks if a table exists in the database
 func (db *DB) PushTokenTableExists(suffix string) (bool, error) {
 	tableName := fmt.Sprintf("t_push_token_%s", suffix)
+	row := db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
+	var name string
+	err := row.Scan(&name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Table does not exist
+			return false, nil
+		} else {
+			// A database error occurred
+			return false, err
+		}
+	}
+
+	return true, nil
+}
+
+// ListenersTableExists checks if a table exists in the database
+func (db *DB) ListenersTableExists(suffix string) (bool, error) {
+	tableName := fmt.Sprintf("t_listeners_%s", suffix)
 	row := db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
 	var name string
 	err := row.Scan(&name)
@@ -369,6 +418,25 @@ func (d *DB) AddPushTokenDB(contract string) (*PushTokenDB, error) {
 	}
 	d.PushTokenDB[name] = ptdb
 	return ptdb, nil
+}
+
+// AddListenersDB adds a new push token db for the given contract
+func (d *DB) AddListenersDB(contract string) (*ListenersDB, error) {
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if lsdb, ok := d.ListenersDB[name]; ok {
+		return lsdb, nil
+	}
+	lsdb, err := NewListenersDB(d.db, d.rdb, name)
+	if err != nil {
+		return nil, err
+	}
+	d.ListenersDB[name] = lsdb
+	return lsdb, nil
 }
 
 // Close closes the db and all its transfer and push dbs

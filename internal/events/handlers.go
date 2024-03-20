@@ -59,6 +59,17 @@ func (s *Service) AddEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	exists, err = s.db.ListenersTableExists(name)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	// if we are adding an event, it should be queued for indexing
 	ev.State = indexer.EventStateQueued
 
@@ -98,6 +109,22 @@ func (s *Service) AddEvent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
+	}
+
+	lsdb, err := s.db.AddListenersDB(ev.Contract)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	err = lsdb.CreateListenersTable()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
+	err = lsdb.CreateListenersTableIndexes()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 
 	// add event to database
