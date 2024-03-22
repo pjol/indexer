@@ -10,6 +10,7 @@ import (
 	"github.com/citizenwallet/indexer/internal/accounts"
 	"github.com/citizenwallet/indexer/internal/chain"
 	"github.com/citizenwallet/indexer/internal/events"
+	"github.com/citizenwallet/indexer/internal/listeners"
 	"github.com/citizenwallet/indexer/internal/logs"
 	"github.com/citizenwallet/indexer/internal/paymaster"
 	"github.com/citizenwallet/indexer/internal/profiles"
@@ -76,6 +77,7 @@ func (r *Router) CreateHandler() (http.Handler, error) {
 	// instantiate handlers
 	l := logs.NewService(r.chainId, r.db, r.evm)
 	ev := events.NewService(r.db)
+	ls := listeners.NewService(r.db)
 	pr := profiles.NewService(r.b, r.evm, comm)
 	pu := push.NewService(r.db, comm)
 	acc := accounts.NewService(r.evm, r.accFactAddr, r.db, r.paymasterKey)
@@ -133,6 +135,12 @@ func (r *Router) CreateHandler() (http.Handler, error) {
 			"eth_sendUserOperation":     uop.Send,
 			"eth_chainId":               ch.ChainId,
 		}))
+	})
+
+	//TODO: add auth to listeners route
+
+	cr.Route("/listeners", func(cr chi.Router) {
+		cr.Post("/", ls.AddListener)
 	})
 
 	// configure legacy routes

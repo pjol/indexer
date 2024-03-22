@@ -82,7 +82,7 @@ func (db *ListenersDB) GetListenerDetails(address string, service string) (*inde
 	return &l, nil
 }
 
-func (db *ListenersDB) AddListener(l indexer.Listener) error {
+func (db *ListenersDB) AddListener(l *indexer.Listener) error {
 	_, err := db.db.Exec(fmt.Sprintf(`
 		INSERT INTO t_listeners_%s (listener_owner, address, service, secret, value)
 		VALUES ($1, $2, $3, $4, $5)
