@@ -35,6 +35,14 @@ func (i *Indexer) EventsFromBlock(ev *indexer.Event, blk *block) error {
 		}
 	}
 
+	lsdb, ok := i.db.GetListenersDB(ev.Contract)
+	if !ok {
+		lsdb, err = i.db.AddListenersDB(ev.Contract)
+		if err != nil {
+			return err
+		}
+	}
+
 	contractAddr := common.HexToAddress(ev.Contract)
 
 	// Calculate the starting block for the filter query
@@ -66,7 +74,7 @@ func (i *Indexer) EventsFromBlock(ev *indexer.Event, blk *block) error {
 		return ErrIndexingRecoverable
 	}
 
-	return i.processTransfersFromLogs(ev, blk, txdb, ptdb, logs)
+	return i.processTransfersFromLogs(ev, blk, txdb, ptdb, lsdb, logs)
 }
 
 func (i *Indexer) FilterQueryFromEvent(ev *indexer.Event) *ethereum.FilterQuery {
@@ -109,6 +117,14 @@ func (i *Indexer) EventsFromLogStream(ctx context.Context, quitAck chan error, e
 		}
 	}
 
+	lsdb, ok := i.db.GetListenersDB(ev.Contract)
+	if !ok {
+		lsdb, err = i.db.AddListenersDB(ev.Contract)
+		if err != nil {
+			return err
+		}
+	}
+
 	logch := make(chan types.Log)
 
 	q := i.FilterQueryFromEvent(ev)
@@ -146,7 +162,7 @@ func (i *Indexer) EventsFromLogStream(ctx context.Context, quitAck chan error, e
 		}
 
 		// process transfers
-		err = i.processTransfersFromLogs(ev, blk, txdb, ptdb, []types.Log{log})
+		err = i.processTransfersFromLogs(ev, blk, txdb, ptdb, lsdb, []types.Log{log})
 		if err != nil {
 			return err
 		}
@@ -161,7 +177,7 @@ func (i *Indexer) EventsFromLogStream(ctx context.Context, quitAck chan error, e
 	return nil
 }
 
-func (i *Indexer) processTransfersFromLogs(ev *indexer.Event, blk *block, txdb *db.TransferDB, ptdb *db.PushTokenDB, logs []types.Log) error {
+func (i *Indexer) processTransfersFromLogs(ev *indexer.Event, blk *block, txdb *db.TransferDB, ptdb *db.PushTokenDB, lsdb *db.ListenersDB, logs []types.Log) error {
 	contractAbi, err := GetContractABI(ev.Standard)
 
 	if len(logs) > 0 {
@@ -185,6 +201,10 @@ func (i *Indexer) processTransfersFromLogs(ev *indexer.Event, blk *block, txdb *
 			// TODO: move to a queue in a separate service
 			if ptdb != nil && i.fb != nil {
 				go sendPushForTxs(ptdb, i.fb, ev, txs)
+			}
+
+			if lsdb != nil {
+				go SendListenerEventsForTxs(lsdb, ev, txs)
 			}
 			// end TODO
 		}
@@ -249,6 +269,37 @@ func sendPushForTxs(ptdb *db.PushTokenDB, fb *firebase.PushService, ev *indexer.
 						continue
 					}
 				}
+			}
+		}
+	}
+}
+
+func SendListenerEventsForTxs(lsdb *db.ListenersDB, ev *indexer.Event, txs []*indexer.Transfer) {
+	for _, tx := range txs {
+		if tx.Status != indexer.TransferStatusSuccess {
+			continue
+		}
+
+		listeners, err := lsdb.GetListenerDetails(tx.To)
+		if err != nil {
+			if len(listeners) == 0 {
+				continue
+			}
+		}
+		for _, listener := range listeners {
+			switch service := listener.Service; service {
+			case "SQUARE":
+				fmt.Printf(`
+	Square listener triggered:
+		Owner: %s
+		Contract: %s
+		Address: %s
+		From: %s
+		Secret: %s
+		Value: %d
+		Amount: %d
+		Status: %s
+				`, listener.Owner, listener.Contract, listener.Address, tx.From, listener.Secret, listener.Value, tx.Value, tx.Status)
 			}
 		}
 	}

@@ -34,6 +34,7 @@ func (db *ListenersDB) CreateListenersTable() error {
 	_, err := db.db.Exec(fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS t_listeners_%s(
 		listener_owner text NOT NULL,
+		contract text NOT NULL,
 		address text NOT NULL,
 		service text NOT NULL,
 		secret text NOT NULL,
@@ -67,26 +68,36 @@ func (db *ListenersDB) CreateListenersTableIndexes() error {
 	return nil
 }
 
-func (db *ListenersDB) GetListenerDetails(address string, service string) (*indexer.Listener, error) {
-	var l indexer.Listener
-	err := db.rdb.QueryRow(fmt.Sprintf(`
-		SELECT listener_owner, address, service, secret, value
+func (db *ListenersDB) GetListenerDetails(address string) ([]*indexer.Listener, error) {
+	rows, err := db.rdb.Query(fmt.Sprintf(`
+		SELECT listener_owner, contract, address, service, secret, value
 		FROM t_listeners_%s
-		WHERE address = $1 AND service = $2
-	`, db.suffix), address, service).Scan(&l.Owner, &l.Address, &l.Service, &l.Secret, &l.Value)
-
+		WHERE address = $1
+	`, db.suffix), address)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	return &l, nil
+	listeners := []*indexer.Listener{}
+	for rows.Next() {
+		var listener indexer.Listener
+		err = rows.Scan(&listener.Owner, &listener.Contract, &listener.Address, &listener.Service, &listener.Secret, &listener.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		listeners = append(listeners, &listener)
+	}
+
+	return listeners, nil
 }
 
 func (db *ListenersDB) AddListener(l *indexer.Listener) error {
 	_, err := db.db.Exec(fmt.Sprintf(`
-		INSERT INTO t_listeners_%s (listener_owner, address, service, secret, value)
-		VALUES ($1, $2, $3, $4, $5)
-	`, db.suffix), l.Owner, l.Address, l.Service, l.Secret, l.Value)
+		INSERT INTO t_listeners_%s (listener_owner, contract, address, service, secret, value)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, db.suffix), l.Owner, l.Contract, l.Address, l.Service, l.Secret, l.Value)
 
 	if err != nil {
 		return err

@@ -381,6 +381,21 @@ func (d *DB) GetPushTokenDB(contract string) (*PushTokenDB, bool) {
 	return ptdb, true
 }
 
+func (d *DB) GetListenersDB(contract string) (*ListenersDB, bool) {
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
+		return nil, false
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	lsdb, ok := d.ListenersDB[name]
+	if !ok {
+		return nil, false
+	}
+	return lsdb, true
+}
+
 // AddTransferDB adds a new transfer db for the given contract
 func (d *DB) AddTransferDB(contract string) (*TransferDB, error) {
 	name, err := d.TableNameSuffix(contract)
