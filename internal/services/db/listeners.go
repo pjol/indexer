@@ -34,11 +34,16 @@ func (db *ListenersDB) CreateListenersTable() error {
 	_, err := db.db.Exec(fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS t_listeners_%s(
 		listener_owner text NOT NULL,
+		owner_id text NOT NULL,
+		location_id text,
 		contract text NOT NULL,
+		token_name text NOT NULL,
 		address text NOT NULL,
 		service text NOT NULL,
 		secret text NOT NULL,
 		value int NOT NULL,
+		refresh_token,
+		expires_at timestamp,
 		created_at timestamp NOT NULL DEFAULT current_timestamp,
 		updated_at timestamp NOT NULL DEFAULT current_timestamp,
 		UNIQUE (address, service)
@@ -70,7 +75,7 @@ func (db *ListenersDB) CreateListenersTableIndexes() error {
 
 func (db *ListenersDB) GetListenerDetails(address string) ([]*indexer.Listener, error) {
 	rows, err := db.rdb.Query(fmt.Sprintf(`
-		SELECT listener_owner, contract, address, service, secret, value
+		SELECT listener_owner, location_id, contract, token_name, address, service, secret, value
 		FROM t_listeners_%s
 		WHERE address = $1
 	`, db.suffix), address)
@@ -82,7 +87,7 @@ func (db *ListenersDB) GetListenerDetails(address string) ([]*indexer.Listener, 
 	listeners := []*indexer.Listener{}
 	for rows.Next() {
 		var listener indexer.Listener
-		err = rows.Scan(&listener.Owner, &listener.Contract, &listener.Address, &listener.Service, &listener.Secret, &listener.Value)
+		err = rows.Scan(&listener.Owner, &listener.LocationId, &listener.Contract, &listener.TokenName, &listener.Address, &listener.Service, &listener.Secret, &listener.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -95,9 +100,9 @@ func (db *ListenersDB) GetListenerDetails(address string) ([]*indexer.Listener, 
 
 func (db *ListenersDB) AddListener(l *indexer.Listener) error {
 	_, err := db.db.Exec(fmt.Sprintf(`
-		INSERT INTO t_listeners_%s (listener_owner, contract, address, service, secret, value)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, db.suffix), l.Owner, l.Contract, l.Address, l.Service, l.Secret, l.Value)
+		INSERT INTO t_listeners_%s (listener_owner, owner_id, location_id, contract, token_name, address, service, secret, value, refresh_token, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, db.suffix), l.Owner, l.OwnerId, l.LocationId, l.Contract, l.TokenName, l.Address, l.Service, l.Secret, l.Value, l.RefreshToken, l.Expiry)
 
 	if err != nil {
 		return err

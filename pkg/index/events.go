@@ -7,6 +7,7 @@ import (
 
 	"github.com/citizenwallet/indexer/internal/services/db"
 	"github.com/citizenwallet/indexer/internal/services/firebase"
+	lis "github.com/citizenwallet/indexer/internal/services/listeners"
 	"github.com/citizenwallet/indexer/pkg/indexer"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -289,17 +290,23 @@ func SendListenerEventsForTxs(lsdb *db.ListenersDB, ev *indexer.Event, txs []*in
 		for _, listener := range listeners {
 			switch service := listener.Service; service {
 			case "SQUARE":
-				fmt.Printf(`
-	Square listener triggered:
-		Owner: %s
-		Contract: %s
-		Address: %s
-		From: %s
-		Secret: %s
-		Value: %d
-		Amount: %d
-		Status: %s
-				`, listener.Owner, listener.Contract, listener.Address, tx.From, listener.Secret, listener.Value, tx.Value, tx.Status)
+				// 			fmt.Printf(`
+				// Square listener triggered:
+				// 	Owner: %s
+				// 	Contract: %s
+				// 	Address: %s
+				// 	From: %s
+				// 	Secret: %s
+				// 	Value: %d
+				// 	Amount: %d
+				// 	Status: %s
+				// 			`, listener.Owner, listener.Contract, listener.Address, tx.From, listener.Secret, listener.Value, tx.Value, tx.Status)
+
+				err = lis.SendSquareTransaction(listener, tx)
+				if err != nil {
+					//TODO: implement retries
+					fmt.Println("error sending tx")
+				}
 			}
 		}
 	}
