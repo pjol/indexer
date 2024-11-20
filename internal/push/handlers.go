@@ -6,21 +6,18 @@ import (
 
 	com "github.com/citizenwallet/indexer/internal/common"
 	"github.com/citizenwallet/indexer/internal/services/db"
-	"github.com/citizenwallet/indexer/internal/services/ethrequest"
 	"github.com/citizenwallet/indexer/pkg/indexer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 )
 
 type Service struct {
-	db   *db.DB
-	comm *ethrequest.Community
+	db *db.DB
 }
 
-func NewService(db *db.DB, comm *ethrequest.Community) *Service {
+func NewService(db *db.DB) *Service {
 	return &Service{
-		db:   db,
-		comm: comm,
+		db: db,
 	}
 }
 
@@ -64,9 +61,9 @@ func (s *Service) AddToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tname, flag := s.db.TransferName(contractAddr)
-	if flag {
-		w.WriteHeader(http.StatusForbidden)
+	tname, err := s.db.TableNameSuffix(contractAddr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -119,9 +116,9 @@ func (s *Service) RemoveAccountToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tname, flag := s.db.TransferName(contractAddr)
-	if flag {
-		w.WriteHeader(http.StatusForbidden)
+	tname, err := s.db.TableNameSuffix(contractAddr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -131,7 +128,7 @@ func (s *Service) RemoveAccountToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := pdb.RemoveAccountPushToken(token, accaddr)
+	err = pdb.RemoveAccountPushToken(token, accaddr)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

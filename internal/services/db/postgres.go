@@ -2,9 +2,11 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -91,7 +93,11 @@ func NewPostgresDB(chainID *big.Int, username, password, name, host, rhost, secr
 	}
 
 	for _, ev := range evs {
-		name := pdb.TransferName(ev.Contract)
+		name, err := pdb.TableNameSuffix(ev.Contract)
+		if err != nil {
+			return nil, err
+		}
+
 		log.Default().Println("creating transfer db for: ", name)
 
 		txdb[name], err = NewTransferDB(db, db, name)
@@ -156,7 +162,7 @@ func NewPostgresDB(chainID *big.Int, username, password, name, host, rhost, secr
 // EventTableExists checks if a table exists in the database
 func (db *PostgresDB) EventTableExists(suffix string) (bool, error) {
 	var exists bool
-	err := db.db.QueryRow(fmt.Sprintf(`
+	err := db.rdb.QueryRow(fmt.Sprintf(`
     SELECT EXISTS (
         SELECT 1
         FROM information_schema.tables
@@ -174,7 +180,7 @@ func (db *PostgresDB) EventTableExists(suffix string) (bool, error) {
 // SponsorTableExists checks if a table exists in the database
 func (db *PostgresDB) SponsorTableExists(suffix string) (bool, error) {
 	var exists bool
-	err := db.db.QueryRow(fmt.Sprintf(`
+	err := db.rdb.QueryRow(fmt.Sprintf(`
     SELECT EXISTS (
         SELECT 1
         FROM information_schema.tables
@@ -192,7 +198,7 @@ func (db *PostgresDB) SponsorTableExists(suffix string) (bool, error) {
 // TransferTableExists checks if a table exists in the database
 func (db *PostgresDB) TransferTableExists(suffix string) (bool, error) {
 	var exists bool
-	err := db.db.QueryRow(fmt.Sprintf(`
+	err := db.rdb.QueryRow(fmt.Sprintf(`
     SELECT EXISTS (
         SELECT 1
         FROM information_schema.tables
@@ -210,7 +216,7 @@ func (db *PostgresDB) TransferTableExists(suffix string) (bool, error) {
 // PushTokenTableExists checks if a table exists in the database
 func (db *PostgresDB) PushTokenTableExists(suffix string) (bool, error) {
 	var exists bool
-	err := db.db.QueryRow(fmt.Sprintf(`
+	err := db.rdb.QueryRow(fmt.Sprintf(`
     SELECT EXISTS (
         SELECT 1
         FROM information_schema.tables
@@ -225,14 +231,25 @@ func (db *PostgresDB) PushTokenTableExists(suffix string) (bool, error) {
 	return exists, nil
 }
 
-// TransferName returns the name of the transfer db for the given contract
-func (d *PostgresDB) TransferName(contract string) string {
-	return fmt.Sprintf("%v_%s", d.chainID, strings.ToLower(contract))
+// TableNameSuffix returns the name of the transfer db for the given contract
+func (d *PostgresDB) TableNameSuffix(contract string) (string, error) {
+	re := regexp.MustCompile("^0x[0-9a-fA-F]{40}$")
+
+	suffix := fmt.Sprintf("%v_%s", d.chainID, strings.ToLower(contract))
+
+	if !re.MatchString(contract) {
+		return suffix, errors.New("bad contract address")
+	}
+
+	return suffix, nil
 }
 
 // GetTransferDB returns true if the transfer db for the given contract exists, returns the db if it exists
 func (d *PostgresDB) GetTransferDB(contract string) (*TransferDB, bool) {
-	name := d.TransferName(contract)
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
+		return nil, false
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	txdb, ok := d.TransferDB[name]
@@ -244,7 +261,11 @@ func (d *PostgresDB) GetTransferDB(contract string) (*TransferDB, bool) {
 
 // GetPushTokenDB returns true if the push token db for the given contract exists, returns the db if it exists
 func (d *PostgresDB) GetPushTokenDB(contract string) (*PushTokenDB, bool) {
-	name := d.TransferName(contract)
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
+		return nil, false
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ptdb, ok := d.PushTokenDB[name]
@@ -256,7 +277,10 @@ func (d *PostgresDB) GetPushTokenDB(contract string) (*PushTokenDB, bool) {
 
 // AddTransferDB adds a new transfer db for the given contract
 func (d *PostgresDB) AddTransferDB(contract string) (*TransferDB, error) {
-	name := d.TransferName(contract)
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
+		return nil, err
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if txdb, ok := d.TransferDB[name]; ok {
@@ -272,7 +296,10 @@ func (d *PostgresDB) AddTransferDB(contract string) (*TransferDB, error) {
 
 // AddPushTokenDB adds a new push token db for the given contract
 func (d *PostgresDB) AddPushTokenDB(contract string) (*PushTokenDB, error) {
-	name := d.TransferName(contract)
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
+		return nil, err
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if ptdb, ok := d.PushTokenDB[name]; ok {
@@ -317,11 +344,14 @@ func (d *PostgresDB) Close() error {
 }
 
 // Migrate to Sqlite db
-func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
+func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string, txBatchSize int) error {
 	log.Default().Println("starting migration...")
 
 	// instantiate tables
-	name := d.TransferName(token)
+	name, err := d.TableNameSuffix(token)
+	if err != nil {
+		return err
+	}
 
 	pushDB, exists := sqdb.GetPushTokenDB(token)
 	if !exists {
@@ -331,6 +361,11 @@ func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
 		}
 
 		err = p.CreatePushTable()
+		if err != nil {
+			return err
+		}
+
+		err = p.CreatePushTableIndexes()
 		if err != nil {
 			return err
 		}
@@ -346,6 +381,11 @@ func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
 		}
 
 		err = t.CreateTransferTable()
+		if err != nil {
+			return err
+		}
+
+		err = t.CreateTransferTableIndexes()
 		if err != nil {
 			return err
 		}
@@ -374,30 +414,41 @@ func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
 			return err
 		}
 
-		// fetch sponsor
-		sponsor, err := d.SponsorDB.GetSponsor(paymaster)
-		if err != nil {
-			return err
-		}
+		if paymaster != "" {
+			// migrate paymaster if provided
 
-		log.Default().Println("migrating sponsor: ", sponsor.Contract)
+			// fetch sponsor
+			sponsor, err := d.SponsorDB.GetSponsor(paymaster)
+			if err != nil {
+				return err
+			}
 
-		// add sponsor
-		err = sqdb.SponsorDB.AddSponsor(sponsor)
-		if err != nil {
-			return err
+			log.Default().Println("migrating sponsor: ", sponsor.Contract)
+
+			// add sponsor
+			err = sqdb.SponsorDB.AddSponsor(sponsor)
+			if err != nil {
+				return err
+			}
 		}
 
 		log.Default().Println("migrating push tokens")
+
+		total, err := countRows(d.rdb, fmt.Sprintf("t_push_token_%s", name))
+		if err != nil {
+			return err
+		}
 
 		// migrate all push tokens
 		batchSize := 100
 		offset := 0
 		for {
+			log.Default().Println(offset, "/", total, "...")
 			rows, err := d.rdb.Query(fmt.Sprintf("SELECT token, account FROM t_push_token_%s ORDER BY token LIMIT $1 OFFSET $2", name), batchSize, offset)
 			if err != nil {
-				log.Fatal(err)
+				return err
 			}
+			defer rows.Close()
 
 			var count int
 			for rows.Next() {
@@ -416,8 +467,6 @@ func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
 				count++
 			}
 
-			log.Default().Println("migrated ", count, " push tokens")
-
 			if count < batchSize {
 				// If we fetched fewer rows than the batch size, we've fetched all rows.
 				break
@@ -426,20 +475,27 @@ func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
 			// Increment the offset by batchSize for the next iteration.
 			offset += batchSize
 		}
+		log.Default().Println(total, "/", total)
 
 		log.Default().Println("migrating transfers")
 
+		total, err = countRows(d.rdb, fmt.Sprintf("t_transfers_%s", name))
+		if err != nil {
+			return err
+		}
+
 		// migrate all transfers
-		batchSize = 1000
 		offset = 0
 		for {
+			log.Default().Println(offset, "/", total, "...")
 			rows, err := d.rdb.Query(fmt.Sprintf(`
 				SELECT hash, tx_hash, token_id, created_at, from_to_addr, from_addr, to_addr, nonce, value, data, status
 				FROM t_transfers_%s ORDER BY created_at LIMIT $1  OFFSET $2
-			`, name), batchSize, offset)
+			`, name), txBatchSize, offset)
 			if err != nil {
-				log.Fatal(err)
+				return err
 			}
+			defer rows.Close()
 
 			var count int
 			for rows.Next() {
@@ -463,17 +519,29 @@ func (d *PostgresDB) Migrate(sqdb *DB, token, paymaster string) error {
 				count++
 			}
 
-			log.Default().Println("migrated ", count, " transfer events")
-
-			if count < batchSize {
+			if count < txBatchSize {
 				// If we fetched fewer rows than the batch size, we've fetched all rows.
 				break
 			}
 
 			// Increment the offset by batchSize for the next iteration.
-			offset += batchSize
+			offset += txBatchSize
 		}
+		log.Default().Println(total, "/", total)
 	}
 
 	return nil
+}
+
+func countRows(db *sql.DB, tableName string) (int, error) {
+	var count int
+
+	// Prepare the SQL statement
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	err := db.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
 }

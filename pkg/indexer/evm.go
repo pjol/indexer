@@ -27,7 +27,7 @@ type EVMRequester interface {
 	BaseFee() (*big.Int, error)
 	EstimateGasPrice() (*big.Int, error)
 	EstimateGasLimit(msg ethereum.CallMsg) (uint64, error)
-	NewTx(nonce uint64, from, to common.Address, data []byte) (*types.Transaction, error)
+	NewTx(nonce uint64, from, to common.Address, data []byte, extraGas bool) (*types.Transaction, error)
 	SendTransaction(tx *types.Transaction) error
 	StorageAt(addr common.Address, slot common.Hash) ([]byte, error)
 
@@ -35,9 +35,10 @@ type EVMRequester interface {
 	LatestBlock() (*big.Int, error)
 	FilterLogs(q ethereum.FilterQuery) ([]types.Log, error)
 	BlockTime(number *big.Int) (uint64, error)
+	CallContract(call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 	ListenForLogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) error
 
-	WaitForTx(tx *types.Transaction) error
+	WaitForTx(tx *types.Transaction, timeout int) error
 
 	Close()
 }

@@ -19,6 +19,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/go-chi/chi/v5"
 )
@@ -26,17 +28,13 @@ import (
 type Service struct {
 	evm indexer.EVMRequester
 
-	accountFactory common.Address
-	db             *db.DB
-	paymasterKey   *ecdsa.PrivateKey
+	db *db.DB
 }
 
-func NewService(evm indexer.EVMRequester, accountFactory string, db *db.DB, paymasterKey *ecdsa.PrivateKey) *Service {
+func NewService(evm indexer.EVMRequester, db *db.DB) *Service {
 	return &Service{
-		evm:            evm,
-		accountFactory: common.HexToAddress(accountFactory),
-		db:             db,
-		paymasterKey:   paymasterKey,
+		evm: evm,
+		db:  db,
 	}
 }
 
@@ -74,6 +72,7 @@ type creationResponse struct {
 	AccountAddress string `json:"account_address"`
 }
 
+// Deprecated: This is handled by initCode transactions now
 // Create handler for publishing an account
 func (s *Service) Create(w http.ResponseWriter, r *http.Request) {
 	// ensure that the address in the request body matches the one in the headers
@@ -177,7 +176,10 @@ func (s *Service) Create(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// legacy account with a token entrypoint
-		privateKey = s.paymasterKey
+		// A hard migration was conducted in November 2023 for all accounts to have a token entrypoint
+		// this allows for 4337 transactions without the need for a full node
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 
 	} else {
 		tepContract, err := tokenEntryPoint.NewTokenEntryPoint(tep, s.evm.Backend())
@@ -207,13 +209,46 @@ func (s *Service) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	transactor, err := bind.NewKeyedTransactorWithChainID(privateKey, chainId)
+	// Get the public key from the private key
+	publicKey := privateKey.Public().(*ecdsa.PublicKey)
+
+	// Convert the public key to an Ethereum address
+	sponsor := crypto.PubkeyToAddress(*publicKey)
+
+	// Get the nonce for the sponsor's address
+	nonce, err := s.evm.NonceAt(context.Background(), sponsor, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	tx, err := afcontract.CreateAccount(transactor, owner, common.Big0)
+	// Parse the contract ABI
+	parsedABI, err := accfactory.AccfactoryMetaData.GetAbi()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	data, err := parsedABI.Pack("createAccount", owner, &req.Salt)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Create a new transaction
+	tx, err := s.evm.NewTx(nonce, sponsor, af, data, true)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	signedTx, err := types.SignTx(tx, types.NewLondonSigner(chainId), privateKey)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	err = s.evm.SendTransaction(signedTx)
 	if err != nil {
 		e, ok := err.(rpc.Error)
 		if ok && e.ErrorCode() != -32000 {
@@ -231,8 +266,9 @@ func (s *Service) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: use the queue here
 	// wait for tx to be mined
-	err = s.evm.WaitForTx(tx)
+	err = s.evm.WaitForTx(tx, 3)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -368,6 +404,8 @@ func (s *Service) Upgrade(w http.ResponseWriter, r *http.Request) {
 
 	// Check if the account contract is already deployed and deploy if missing
 	if len(acc2bytecode) == 0 {
+		// TODO: re-evaluate the necessity of this. If an account does not exist, how can it be upgraded?
+
 		// upgrade account
 		chainId, err := s.evm.ChainID()
 		if err != nil {
@@ -425,8 +463,9 @@ func (s *Service) Upgrade(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// TODO: use the queue here
 		// wait for tx to be mined
-		err = s.evm.WaitForTx(tx)
+		err = s.evm.WaitForTx(tx, 10)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return

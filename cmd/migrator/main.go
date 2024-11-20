@@ -15,6 +15,8 @@ func main() {
 
 	chainId := flag.Int("chain", 1, "chain id")
 
+	txBatch := flag.Int("txbatch", 1000, "tx batch size")
+
 	token := flag.String("token", "", "token address")
 
 	paymasterAddr := flag.String("paymaster", "", "paymaster address")
@@ -31,10 +33,6 @@ func main() {
 
 	if token == nil || *token == "" {
 		log.Fatal("token is required")
-	}
-
-	if paymasterAddr == nil || *paymasterAddr == "" {
-		log.Fatal("paymaster address is required")
 	}
 
 	chid := big.NewInt(int64(*chainId))
@@ -57,7 +55,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	err = pqdb.Migrate(db, *token, *paymasterAddr)
+	err = pqdb.Migrate(db, *token, *paymasterAddr, *txBatch)
 	if err != nil {
 		log.Fatal(err)
 	}

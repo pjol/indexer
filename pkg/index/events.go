@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 
 	"github.com/citizenwallet/indexer/internal/services/db"
@@ -134,10 +133,10 @@ func (i *Indexer) EventsFromLogStream(ctx context.Context, quitAck chan error, e
 			blks[log.BlockNumber] = blk
 
 			// clean up old blocks
-			for k, v := range toDelete {
+			for _, v := range toDelete {
 				if v.t < t {
 					delete(blks, v.b)
-					toDelete = comm.Remove(toDelete, k)
+					toDelete = comm.Filter(toDelete, func(c cleanup) bool { return c.b != v.b })
 				}
 			}
 
@@ -145,7 +144,14 @@ func (i *Indexer) EventsFromLogStream(ctx context.Context, quitAck chan error, e
 			toDelete = append(toDelete, cleanup{t: blk.Time + 60, b: blk.Number})
 		}
 
+		// process transfers
 		err = i.processTransfersFromLogs(ev, blk, txdb, ptdb, []types.Log{log})
+		if err != nil {
+			return err
+		}
+
+		// cleanup old pending and sending transfers
+		err = txdb.RemoveOldInProgressTransfers()
 		if err != nil {
 			return err
 		}
@@ -177,7 +183,7 @@ func (i *Indexer) processTransfersFromLogs(ev *indexer.Event, blk *block, txdb *
 
 			// TODO: move to a queue in a separate service
 			if ptdb != nil && i.fb != nil {
-				go sendPushForTxs(ptdb, i.fb, ev, txs)
+				go firebase.SendPushForTxs(ptdb, i.fb, ev, txs)
 			}
 			// end TODO
 		}
@@ -195,54 +201,4 @@ func (i *Indexer) processTransfersFromLogs(ev *indexer.Event, blk *block, txdb *
 	}
 
 	return nil
-}
-
-func sendPushForTxs(ptdb *db.PushTokenDB, fb *firebase.PushService, ev *indexer.Event, txs []*indexer.Transfer) {
-	accTokens := map[string][]*indexer.PushToken{}
-
-	messages := []*indexer.PushMessage{}
-
-	for _, tx := range txs {
-		if tx.Status != indexer.TransferStatusSuccess {
-			continue
-		}
-
-		if _, ok := accTokens[tx.To]; !ok {
-			// get the push tokens for the recipient
-			pt, err := ptdb.GetAccountTokens(tx.To)
-			if err != nil {
-				return
-			}
-
-			if len(pt) == 0 {
-				// no push tokens for this account
-				continue
-			}
-
-			accTokens[tx.To] = pt
-		}
-
-		value := tx.ToRounded(ev.Decimals)
-
-		messages = append(messages, indexer.NewAnonymousPushMessage(accTokens[tx.To], ev.Name, fmt.Sprintf("%.2f", value), ev.Symbol, tx.Data))
-	}
-
-	if len(messages) > 0 {
-		for _, push := range messages {
-			badTokens, err := fb.Send(push)
-			if err != nil {
-				continue
-			}
-
-			if len(badTokens) > 0 {
-				// remove the bad tokens
-				for _, token := range badTokens {
-					err = ptdb.RemovePushToken(token)
-					if err != nil {
-						continue
-					}
-				}
-			}
-		}
-	}
 }

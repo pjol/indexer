@@ -61,6 +61,10 @@ func (e *OPService) BlockTime(number *big.Int) (uint64, error) {
 	return v, nil
 }
 
+func (e *OPService) CallContract(call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	return e.client.CallContract(e.ctx, call, blockNumber)
+}
+
 func (e *OPService) ListenForLogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) error {
 	for {
 		sub, err := e.client.SubscribeFilterLogs(ctx, q, ch)
@@ -119,7 +123,7 @@ func (e *OPService) EstimateGasLimit(msg ethereum.CallMsg) (uint64, error) {
 	return e.client.EstimateGas(e.ctx, msg)
 }
 
-func (e *OPService) NewTx(nonce uint64, from, to common.Address, data []byte) (*types.Transaction, error) {
+func (e *OPService) NewTx(nonce uint64, from, to common.Address, data []byte, extraGas bool) (*types.Transaction, error) {
 	baseFee, err := e.BaseFee()
 	if err != nil {
 		return nil, err
@@ -152,11 +156,18 @@ func (e *OPService) NewTx(nonce uint64, from, to common.Address, data []byte) (*
 		return nil, err
 	}
 
+	gasFeeCap := new(big.Int).Add(maxFeePerGas, new(big.Int).Div(maxFeePerGas, big.NewInt(10)))
+	gasTipCap := new(big.Int).Add(maxPriorityFeePerGas, new(big.Int).Div(maxPriorityFeePerGas, big.NewInt(10)))
+	if extraGas {
+		gasFeeCap = new(big.Int).Add(maxFeePerGas, new(big.Int).Div(maxFeePerGas, big.NewInt(5)))
+		gasTipCap = new(big.Int).Add(maxPriorityFeePerGas, new(big.Int).Div(maxPriorityFeePerGas, big.NewInt(5)))
+	}
+
 	// Create a new dynamic fee transaction
 	tx := types.NewTx(&types.DynamicFeeTx{
 		Nonce:     nonce,
-		GasFeeCap: maxFeePerGas,
-		GasTipCap: maxPriorityFeePerGas,
+		GasFeeCap: gasFeeCap,
+		GasTipCap: gasTipCap,
 		Gas:       gasLimit + (gasLimit / 2), // make sure there is some margin for spikes
 		To:        &to,
 		Value:     common.Big0,
@@ -211,8 +222,12 @@ func (e *OPService) FilterLogs(q ethereum.FilterQuery) ([]types.Log, error) {
 	return e.client.FilterLogs(e.ctx, q)
 }
 
-func (e *OPService) WaitForTx(tx *types.Transaction) error {
-	rcpt, err := bind.WaitMined(e.ctx, e.client, tx)
+func (e *OPService) WaitForTx(tx *types.Transaction, timeout int) error {
+	// Create a context that will be canceled after 4 seconds
+	ctx, cancel := context.WithTimeout(e.ctx, time.Duration(timeout)*time.Second)
+	defer cancel() // Cancel the context when the function returns
+
+	rcpt, err := bind.WaitMined(ctx, e.client, tx)
 	if err != nil {
 		return err
 	}

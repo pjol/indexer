@@ -38,4 +38,11 @@ __debug_bin*
 # ui files
 _ui
 
-binaries
+outputs
+
+# community
+/config
+community.json
+
+# system files
+.DS_Store
