@@ -205,14 +205,6 @@ func (s *UserOpService) Process(messages []indexer.Message) (invalid []indexer.M
 
 				suffix, err := s.db.TableNameSuffix(dest.Hex())
 				if err == nil {
-					// Get the transfer database for the destination address
-					tdb, ok = s.db.TransferDB[suffix]
-					if ok {
-						// If the transfer database exists, add the transfer log to it
-						tdb.AddTransfer(log)
-				suffix, err := s.db.TableNameSuffix(dest.Hex())
-				if err == nil {
-					// Get the transfer database for the destination address
 					tdb, ok = s.db.TransferDB[suffix]
 					if ok {
 						// If the transfer database exists, add the transfer log to it
