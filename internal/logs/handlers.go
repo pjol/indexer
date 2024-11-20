@@ -30,6 +30,42 @@ func NewService(chainID *big.Int, db *db.DB, evm indexer.EVMRequester) *Service 
 	}
 }
 
+func (s *Service) GetSingle(w http.ResponseWriter, r *http.Request) {
+	// parse contract address from url params
+	contractAddr := chi.URLParam(r, "token_address")
+
+	// parse hash from url params
+	hash := chi.URLParam(r, "hash")
+
+	if hash == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	name, err := s.db.TableNameSuffix(contractAddr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	tdb, ok := s.db.TransferDB[name]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	tx, err := tdb.GetTransfer(hash)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	err = com.Body(w, tx, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+}
+
 func (s *Service) GetAll(w http.ResponseWriter, r *http.Request) {
 	// parse contract address from url params
 	contractAddr := chi.URLParam(r, "token_address")
@@ -83,7 +119,68 @@ func (s *Service) GetAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: remove legacy support
-	total := offset + 10
+	total := offset + limit
+
+	err = com.BodyMultiple(w, logs, com.Pagination{Limit: limit, Offset: offset, Total: total})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+}
+
+func (s *Service) GetAllNew(w http.ResponseWriter, r *http.Request) {
+	// parse contract address from url params
+	contractAddr := chi.URLParam(r, "token_address")
+
+	// parse fromDate from url query
+	fromDateq, _ := url.QueryUnescape(r.URL.Query().Get("fromDate"))
+
+	t, err := time.Parse(time.RFC3339, fromDateq)
+	if err != nil {
+		t = time.Now()
+	}
+	fromDate := t.UTC()
+
+	// parse pagination params from url query
+	limitq := r.URL.Query().Get("limit")
+	offsetq := r.URL.Query().Get("offset")
+
+	limit, err := strconv.Atoi(limitq)
+	if err != nil {
+		limit = 20
+	}
+
+	offset, err := strconv.Atoi(offsetq)
+	if err != nil {
+		offset = 0
+	}
+
+	tokenIdq := r.URL.Query().Get("tokenId")
+	tokenId, err := strconv.Atoi(tokenIdq)
+	if err != nil {
+		tokenId = 0
+	}
+
+	name, err := s.db.TableNameSuffix(contractAddr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	tdb, ok := s.db.TransferDB[name]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// get logs from db
+	logs, err := tdb.GetAllNewTransfers(int64(tokenId), fromDate, limit, offset)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: remove legacy support
+	total := offset + limit
 
 	err = com.BodyMultiple(w, logs, com.Pagination{Limit: limit, Offset: offset, Total: total})
 	if err != nil {
@@ -163,7 +260,7 @@ func (s *Service) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: remove legacy support
-	total := offset + 10
+	total := offset + limit
 
 	err = com.BodyMultiple(w, logs, com.Pagination{Limit: limit, Offset: offset, Total: total})
 	if err != nil {
@@ -189,10 +286,16 @@ func (s *Service) GetNew(w http.ResponseWriter, r *http.Request) {
 
 	// parse pagination params from url query
 	limitq := r.URL.Query().Get("limit")
+	offsetq := r.URL.Query().Get("offset")
 
 	limit, err := strconv.Atoi(limitq)
 	if err != nil {
-		limit = 10
+		limit = 20
+	}
+
+	offset, err := strconv.Atoi(offsetq)
+	if err != nil {
+		offset = 0
 	}
 
 	tokenIdq := r.URL.Query().Get("tokenId")
@@ -216,13 +319,16 @@ func (s *Service) GetNew(w http.ResponseWriter, r *http.Request) {
 	chkaddr := com.ChecksumAddress(accaddr)
 
 	// get logs from db
-	logs, err := tdb.GetNewTransfers(int64(tokenId), chkaddr, fromDate, limit)
+	logs, err := tdb.GetNewTransfers(int64(tokenId), chkaddr, fromDate, limit, offset)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	err = com.BodyMultiple(w, logs, nil)
+	// TODO: remove legacy support
+	total := offset + limit
+
+	err = com.BodyMultiple(w, logs, com.Pagination{Limit: limit, Offset: offset, Total: total})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 	}

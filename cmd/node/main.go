@@ -4,8 +4,8 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"time"
 
@@ -19,7 +19,6 @@ import (
 	"github.com/citizenwallet/indexer/pkg/indexer"
 	"github.com/citizenwallet/indexer/pkg/queue"
 	"github.com/citizenwallet/indexer/pkg/router"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/getsentry/sentry-go"
 )
 
@@ -47,13 +46,15 @@ func main() {
 
 	env := flag.String("env", "", "path to .env file")
 
+	confpath := flag.String("confpath", "./config", "path to config file")
+
 	certpath := flag.String("certpath", "./certs", "cert folder path")
 
 	port := flag.Int("port", 3000, "port to listen on")
 
 	sync := flag.Int("sync", 1, "sync from block number (default: 1)")
 
-	useropqbf := flag.Int("buffer", 100, "userop queue buffer size (default: 100)")
+	useropqbf := flag.Int("buffer", 1000, "userop queue buffer size (default: 1000)")
 
 	ws := flag.Bool("ws", false, "enable websocket")
 
@@ -73,7 +74,7 @@ func main() {
 
 	ctx := context.Background()
 
-	conf, err := config.New(ctx, *env)
+	conf, err := config.New(ctx, *env, *confpath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -169,20 +170,18 @@ func main() {
 
 	bu := bucket.NewBucket(conf.PinataBaseURL, conf.PinataAPIKey, conf.PinataAPISecret)
 
-	pkBytes, err := hex.DecodeString(conf.PaymasterKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Generate ecdsa.PrivateKey from bytes
-	privateKey, err := crypto.ToECDSA(pkBytes)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	w := webhook.NewMessager(conf.DiscordURL, conf.RPCChainName, *notify)
+	defer func() {
+		if r := recover(); r != nil {
+			// in case of a panic, notify the webhook messager with an error notification
+			err := fmt.Errorf("recovered from panic: %v", r)
+			log.Default().Println(err)
+			w.NotifyError(ctx, err)
+			sentry.CaptureException(err)
+		}
+	}()
 
-	op := queue.NewUserOpService(d, evm)
+	op := queue.NewUserOpService(d, evm, fb)
 
 	useropq := queue.NewService("userop", 3, *useropqbf, ctx, w)
 
@@ -190,20 +189,20 @@ func main() {
 		quitAck <- useropq.Start(op)
 	}()
 
-	api := router.NewServer(chid, conf.APIKEY, conf.EntryPointAddress, conf.AccountFactoryAddress, conf.ProfileAddress, evm, d, useropq, bu, fb, privateKey)
+	api := router.NewServer(chid, evm, d)
 
 	go func() {
-		handler, err := api.CreateHandler()
-		if err != nil {
-			quitAck <- err
-			return
-		}
+		router := api.CreateBaseRouter()
+
+		api.AddMiddleware(router)
+		api.AddIndexerRoutes(router, bu)
+		api.AddBundlerRoutes(router, useropq)
 
 		if *port == 443 {
-			quitAck <- api.StartTLS(*certpath, handler)
+			quitAck <- api.StartTLS(*certpath, router)
 			return
 		}
-		quitAck <- api.Start(*port, handler)
+		quitAck <- api.Start(*port, router)
 	}()
 
 	log.Default().Println("listening on port: ", *port)

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	dbBaseFolder   = "data"
-	dbConfigString = "cache=private&_journal=WAL&mode=rwc"
+	dbBaseFolder         = "data"
+	dbWriterConfigString = "cache=private&_journal=WAL&mode=rwc"
+	dbReaderConfigString = "cache=private&_journal=WAL&mode=ro"
 )
 
 type DB struct {
@@ -50,9 +51,24 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 	// check if db exists before opening, since we use rwc mode
 	// exists := storage.Exists(path)
 
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?%s", path, dbConfigString))
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?%s", path, dbWriterConfigString))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	rdb, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?%s", path, dbReaderConfigString))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	err = rdb.Ping()
+	if err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	// connStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=5432 sslmode=disable", username, password, name, host)
@@ -60,11 +76,6 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 	// if err != nil {
 	// 	return nil, fmt.Errorf("failed to connect to database: %w", err)
 	// }
-
-	err = db.Ping()
-	if err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
 
 	// rconnStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=5432 sslmode=disable", username, password, name, rhost)
 	// rdb, err := sql.Open("postgres", rconnStr)
@@ -79,12 +90,12 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 
 	evname := chainID.String()
 
-	eventDB, err := NewEventDB(db, db, evname)
+	eventDB, err := NewEventDB(db, rdb, evname)
 	if err != nil {
 		return nil, err
 	}
 
-	sponsorDB, err := NewSponsorDB(db, db, evname, secret)
+	sponsorDB, err := NewSponsorDB(db, rdb, evname, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +103,7 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 	d := &DB{
 		chainID:   chainID,
 		db:        db,
-		rdb:       db,
+		rdb:       rdb,
 		EventDB:   eventDB,
 		SponsorDB: sponsorDB,
 	}
@@ -149,12 +160,14 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 	for _, ev := range evs {
 		name, err := d.TableNameSuffix(ev.Contract)
 		if err != nil {
+		name, err := d.TableNameSuffix(ev.Contract)
+		if err != nil {
 			return nil, err
 		}
 
 		log.Default().Println("creating transfer db for: ", name)
 
-		txdb[name], err = NewTransferDB(db, db, name)
+		txdb[name], err = NewTransferDB(db, rdb, name)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +194,7 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 
 		log.Default().Println("creating push token db for: ", name)
 
-		ptdb[name], err = NewPushTokenDB(db, db, name)
+		ptdb[name], err = NewPushTokenDB(db, rdb, name)
 		if err != nil {
 			return nil, err
 		}
@@ -244,7 +257,7 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 // EventTableExists checks if a table exists in the database
 func (db *DB) EventTableExists(suffix string) (bool, error) {
 	tableName := fmt.Sprintf("t_events_%s", suffix)
-	row := db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
+	row := db.rdb.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
 	var name string
 	err := row.Scan(&name)
 	if err != nil {
@@ -263,7 +276,7 @@ func (db *DB) EventTableExists(suffix string) (bool, error) {
 // SponsorTableExists checks if a table exists in the database
 func (db *DB) SponsorTableExists(suffix string) (bool, error) {
 	tableName := fmt.Sprintf("t_sponsors_%s", suffix)
-	row := db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
+	row := db.rdb.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
 	var name string
 	err := row.Scan(&name)
 	if err != nil {
@@ -282,7 +295,7 @@ func (db *DB) SponsorTableExists(suffix string) (bool, error) {
 // TransferTableExists checks if a table exists in the database
 func (db *DB) TransferTableExists(suffix string) (bool, error) {
 	tableName := fmt.Sprintf("t_transfers_%s", suffix)
-	row := db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
+	row := db.rdb.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName)
 	var name string
 	err := row.Scan(&name)
 	if err != nil {
@@ -317,6 +330,8 @@ func (db *DB) PushTokenTableExists(suffix string) (bool, error) {
 	return true, nil
 }
 
+// TableNameSuffix returns the name of the transfer db for the given contract
+func (d *DB) TableNameSuffix(contract string) (string, error) {
 // ListenersTableExists checks if a table exists in the database
 func (db *DB) ListenersTableExists(suffix string) (bool, error) {
 	tableName := fmt.Sprintf("t_listeners_%s", suffix)
@@ -347,10 +362,17 @@ func (d *DB) TableNameSuffix(contract string) (string, error) {
 	}
 
 	return suffix, nil
+	if !re.MatchString(contract) {
+		return suffix, errors.New("bad contract address")
+	}
+
+	return suffix, nil
 }
 
 // GetTransferDB returns true if the transfer db for the given contract exists, returns the db if it exists
 func (d *DB) GetTransferDB(contract string) (*TransferDB, bool) {
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
 		return nil, false
@@ -367,6 +389,8 @@ func (d *DB) GetTransferDB(contract string) (*TransferDB, bool) {
 
 // GetPushTokenDB returns true if the push token db for the given contract exists, returns the db if it exists
 func (d *DB) GetPushTokenDB(contract string) (*PushTokenDB, bool) {
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
 		return nil, false
@@ -400,6 +424,8 @@ func (d *DB) GetListenersDB(contract string) (*ListenersDB, bool) {
 func (d *DB) AddTransferDB(contract string) (*TransferDB, error) {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
 		return nil, err
 	}
 
@@ -418,6 +444,8 @@ func (d *DB) AddTransferDB(contract string) (*TransferDB, error) {
 
 // AddPushTokenDB adds a new push token db for the given contract
 func (d *DB) AddPushTokenDB(contract string) (*PushTokenDB, error) {
+	name, err := d.TableNameSuffix(contract)
+	if err != nil {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
 		return nil, err

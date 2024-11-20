@@ -1,7 +1,6 @@
 package router
 
 import (
-	"crypto/ecdsa"
 	"crypto/tls"
 	"fmt"
 	"math/big"
@@ -17,9 +16,8 @@ import (
 	"github.com/citizenwallet/indexer/internal/push"
 	"github.com/citizenwallet/indexer/internal/services/bucket"
 	"github.com/citizenwallet/indexer/internal/services/db"
-	"github.com/citizenwallet/indexer/internal/services/ethrequest"
-	"github.com/citizenwallet/indexer/internal/services/firebase"
 	"github.com/citizenwallet/indexer/internal/userop"
+	"github.com/citizenwallet/indexer/internal/version"
 	"github.com/citizenwallet/indexer/pkg/indexer"
 	"github.com/citizenwallet/indexer/pkg/queue"
 	"github.com/go-chi/chi/v5"
@@ -27,42 +25,25 @@ import (
 )
 
 type Router struct {
-	chainId      *big.Int
-	apiKey       string
-	epAddr       string
-	accFactAddr  string
-	prfAddr      string
-	evm          indexer.EVMRequester
-	db           *db.DB
-	useropq      *queue.Service
-	b            *bucket.Bucket
-	firebase     *firebase.PushService
-	paymasterKey *ecdsa.PrivateKey
+	chainId *big.Int
+	evm     indexer.EVMRequester
+	db      *db.DB
 }
 
-func NewServer(chainId *big.Int, apiKey string, epAddr, accFactAddr, prfAddr string, evm indexer.EVMRequester, db *db.DB, useropq *queue.Service, b *bucket.Bucket, firebase *firebase.PushService, pk *ecdsa.PrivateKey) *Router {
+func NewServer(chainId *big.Int, evm indexer.EVMRequester, db *db.DB) *Router {
 	return &Router{
 		chainId,
-		apiKey,
-		epAddr,
-		accFactAddr,
-		prfAddr,
 		evm,
 		db,
-		useropq,
-		b,
-		firebase,
-		pk,
 	}
 }
 
-func (r *Router) CreateHandler() (http.Handler, error) {
+func (r *Router) CreateBaseRouter() *chi.Mux {
 	cr := chi.NewRouter()
+	return cr
+}
 
-	comm, err := ethrequest.NewCommunity(r.evm, r.epAddr, r.accFactAddr, r.prfAddr)
-	if err != nil {
-		return nil, err
-	}
+func (r *Router) AddMiddleware(cr *chi.Mux) *chi.Mux {
 
 	// configure middleware
 	cr.Use(middleware.RequestID)
@@ -74,26 +55,30 @@ func (r *Router) CreateHandler() (http.Handler, error) {
 	cr.Use(RequestSizeLimitMiddleware(10 << 20)) // Limit request bodies to 10MB
 	cr.Use(middleware.Compress(9))
 
+	return cr
+}
+
+func (r *Router) AddIndexerRoutes(cr *chi.Mux, b *bucket.Bucket) *chi.Mux {
+
 	// instantiate handlers
+	v := version.NewService()
 	l := logs.NewService(r.chainId, r.db, r.evm)
 	ev := events.NewService(r.db)
 	ls := listeners.NewService(r.db)
-	pr := profiles.NewService(r.b, r.evm, comm)
-	pu := push.NewService(r.db, comm)
-	acc := accounts.NewService(r.evm, r.accFactAddr, r.db, r.paymasterKey)
-
-	pm := paymaster.NewService(r.evm, r.db)
-	uop := userop.NewService(r.evm, r.db, r.useropq, r.chainId)
-	ch := chain.NewService(r.evm, r.chainId)
-
-	// instantiate legacy handlers
-	legl := logs.NewLegacyService(r.chainId, r.db, comm)
-	legpr := profiles.NewLegacyService(r.b, comm)
+	pr := profiles.NewService(b, r.evm)
+	pu := push.NewService(r.db)
+	acc := accounts.NewService(r.evm, r.db)
 
 	// configure routes
+	cr.Route("/version", func(cr chi.Router) {
+		cr.Get("/", v.Current)
+	})
+
 	cr.Route("/logs/v2/transfers", func(cr chi.Router) {
 		cr.Route("/{token_address}", func(cr chi.Router) {
 			cr.Get("/", l.GetAll)
+			cr.Get("/tx/{hash}", l.GetSingle)
+			cr.Get("/new", l.GetAllNew)
 			cr.Get("/{acc_addr}", l.Get)
 			cr.Get("/{acc_addr}/new", l.GetNew)
 
@@ -128,6 +113,15 @@ func (r *Router) CreateHandler() (http.Handler, error) {
 		})
 	})
 
+	return cr
+}
+
+func (r *Router) AddBundlerRoutes(cr *chi.Mux, useropq *queue.Service) *chi.Mux {
+
+	pm := paymaster.NewService(r.evm, r.db)
+	uop := userop.NewService(r.evm, r.db, useropq, r.chainId)
+	ch := chain.NewService(r.evm, r.chainId)
+
 	cr.Route("/rpc/{pm_address}", func(cr chi.Router) {
 		cr.Post("/", withJSONRPCRequest(map[string]indexer.RPCHandlerFunc{
 			"pm_sponsorUserOperation":   pm.Sponsor,
@@ -139,31 +133,7 @@ func (r *Router) CreateHandler() (http.Handler, error) {
 
 	//TODO: add auth to listeners route
 
-	cr.Route("/listeners", func(cr chi.Router) {
-		cr.Post("/", ls.AddListener)
-	})
-
-	// configure legacy routes
-	cr.Route("/logs/transfers", func(cr chi.Router) {
-		// legacy support: for versions < 1.0.37
-		cr.Route("/{contract_address}", func(cr chi.Router) {
-			cr.Get("/{addr}", legl.Get)
-			cr.Get("/{addr}/new", legl.GetNew)
-
-			cr.Post("/{addr}", withSignature(r.evm, legl.AddSending))
-
-			cr.Patch("/{addr}/{hash}", withSignature(r.evm, legl.SetStatus))
-		})
-	})
-
-	cr.Route("/profiles", func(cr chi.Router) {
-		// legacy support: for versions < 1.0.37
-		cr.Put("/{acc_addr}", withMultiPartSignature(r.evm, legpr.PinMultiPartProfile))
-		cr.Patch("/{acc_addr}", withSignature(r.evm, legpr.PinProfile))
-		cr.Delete("/{acc_addr}", withSignature(r.evm, legpr.Unpin))
-	})
-
-	return cr, nil
+	return cr
 }
 
 func (r *Router) Start(port int, handler http.Handler) error {
