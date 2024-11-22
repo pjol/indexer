@@ -113,6 +113,10 @@ func (r *Router) AddIndexerRoutes(cr *chi.Mux, b *bucket.Bucket) *chi.Mux {
 		})
 	})
 
+	cr.Route("/listeners", func(cr chi.Router) {
+		cr.Post("/", ls.AddListener)
+	})
+
 	return cr
 }
 

@@ -160,8 +160,6 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 	for _, ev := range evs {
 		name, err := d.TableNameSuffix(ev.Contract)
 		if err != nil {
-		name, err := d.TableNameSuffix(ev.Contract)
-		if err != nil {
 			return nil, err
 		}
 
@@ -330,8 +328,6 @@ func (db *DB) PushTokenTableExists(suffix string) (bool, error) {
 	return true, nil
 }
 
-// TableNameSuffix returns the name of the transfer db for the given contract
-func (d *DB) TableNameSuffix(contract string) (string, error) {
 // ListenersTableExists checks if a table exists in the database
 func (db *DB) ListenersTableExists(suffix string) (bool, error) {
 	tableName := fmt.Sprintf("t_listeners_%s", suffix)
@@ -362,17 +358,10 @@ func (d *DB) TableNameSuffix(contract string) (string, error) {
 	}
 
 	return suffix, nil
-	if !re.MatchString(contract) {
-		return suffix, errors.New("bad contract address")
-	}
-
-	return suffix, nil
 }
 
 // GetTransferDB returns true if the transfer db for the given contract exists, returns the db if it exists
 func (d *DB) GetTransferDB(contract string) (*TransferDB, bool) {
-	name, err := d.TableNameSuffix(contract)
-	if err != nil {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
 		return nil, false
@@ -389,8 +378,6 @@ func (d *DB) GetTransferDB(contract string) (*TransferDB, bool) {
 
 // GetPushTokenDB returns true if the push token db for the given contract exists, returns the db if it exists
 func (d *DB) GetPushTokenDB(contract string) (*PushTokenDB, bool) {
-	name, err := d.TableNameSuffix(contract)
-	if err != nil {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
 		return nil, false
@@ -424,8 +411,6 @@ func (d *DB) GetListenersDB(contract string) (*ListenersDB, bool) {
 func (d *DB) AddTransferDB(contract string) (*TransferDB, error) {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
-	name, err := d.TableNameSuffix(contract)
-	if err != nil {
 		return nil, err
 	}
 
@@ -444,8 +429,6 @@ func (d *DB) AddTransferDB(contract string) (*TransferDB, error) {
 
 // AddPushTokenDB adds a new push token db for the given contract
 func (d *DB) AddPushTokenDB(contract string) (*PushTokenDB, error) {
-	name, err := d.TableNameSuffix(contract)
-	if err != nil {
 	name, err := d.TableNameSuffix(contract)
 	if err != nil {
 		return nil, err

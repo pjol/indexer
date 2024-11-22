@@ -138,6 +138,7 @@ func main() {
 			w.NotifyError(ctx, err)
 			log.Fatal(err)
 		}
+		log.Default().Println("starting index service...")
 	}
 
 	w.Notify(ctx, fmt.Sprintf("✅ indexing done for contract: %s", *contract))

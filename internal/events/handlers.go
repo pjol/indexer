@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/citizenwallet/indexer/internal/services/db"
@@ -120,12 +121,16 @@ func (s *Service) AddEvent(w http.ResponseWriter, r *http.Request) {
 	err = lsdb.CreateListenersTable()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	err = lsdb.CreateListenersTableIndexes()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
+
+	fmt.Println("test")
 
 	// add event to database
 	err = s.db.EventDB.AddEvent(ev.Contract, ev.State, ev.StartBlock, ev.LastBlock, ev.Standard, ev.Name, ev.Symbol, ev.Decimals)
