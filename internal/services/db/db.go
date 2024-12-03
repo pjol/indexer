@@ -237,6 +237,11 @@ func NewDB(chainID *big.Int, basePath, secret string) (*DB, error) {
 				return nil, err
 			}
 
+			err = lsdb[name].CreateListenersAuthTable()
+			if err != nil {
+				return nil, err
+			}
+
 			// create indexes
 			err = lsdb[name].CreateListenersTableIndexes()
 			if err != nil {

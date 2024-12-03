@@ -41,6 +41,7 @@ var (
 		"X-Requested-With",
 		"Accept-Encoding",
 		"Authorization",
+		"X-Api-Key",
 		indexer.SignatureHeader,
 		indexer.AddressHeader,
 		indexer.AppVersionHeader,

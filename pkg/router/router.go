@@ -115,6 +115,13 @@ func (r *Router) AddIndexerRoutes(cr *chi.Mux, b *bucket.Bucket) *chi.Mux {
 
 	cr.Route("/listeners", func(cr chi.Router) {
 		cr.Post("/", ls.AddListener)
+		cr.Delete("/", ls.DeleteListener)
+		cr.Get("/zap-example", ls.ExampleZapierResponse)
+		cr.Route("/auth", func(cr chi.Router) {
+			cr.Post("/", ls.NewKey)
+			cr.Get("/", ls.AuthTest)
+			cr.Delete("/", ls.DeleteKey)
+		})
 	})
 
 	return cr

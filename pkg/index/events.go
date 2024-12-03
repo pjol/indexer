@@ -257,6 +257,13 @@ func SendListenerEventsForTxs(lsdb *db.ListenersDB, ev *indexer.Event, txs []*in
 					//TODO: implement retries
 					fmt.Println("error sending tx")
 				}
+
+			case "ZAPIER":
+				err = lis.SendZapierTransaction(listener, tx)
+				fmt.Println(err)
+				if err != nil {
+					fmt.Println("error sending tx")
+				}
 			}
 		}
 	}

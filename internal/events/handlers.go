@@ -124,6 +124,12 @@ func (s *Service) AddEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = lsdb.CreateListenersAuthTable()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	err = lsdb.CreateListenersTableIndexes()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

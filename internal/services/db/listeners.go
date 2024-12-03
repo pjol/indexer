@@ -53,6 +53,20 @@ func (db *ListenersDB) CreateListenersTable() error {
 	return err
 }
 
+func (db *ListenersDB) CreateListenersAuthTable() error {
+	_, err := db.db.Exec(fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS t_listeners_auth_%s(
+      id text PRIMARY KEY,
+      owner text NOT NULL,
+			name text NOT NULL,
+      key text NOT NULL,
+      UNIQUE(key)
+		);
+	`, db.suffix))
+
+	return err
+}
+
 func (db *ListenersDB) CreateListenersTableIndexes() error {
 	_, err := db.db.Exec(fmt.Sprintf(`
     CREATE INDEX IF NOT EXISTS idx_listeners_%s_owner ON t_listeners_%s (listener_owner);
@@ -107,6 +121,64 @@ func (db *ListenersDB) AddListener(l *indexer.Listener) error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (db *ListenersDB) RemoveListener(l *indexer.DeleteRequest) error {
+	_, err := db.db.Exec(fmt.Sprintf(`
+		DELETE FROM t_listeners_%s WHERE (owner_id = $1 AND secret = $2 AND service = $3 AND location_id = $4);
+	`, db.suffix), l.OwnerId, l.Secret, l.Service, l.LocationId)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (db *ListenersDB) MakeKey(k *indexer.KeyRequest) (string, error) {
+	key := indexer.RandomString(32)
+
+	_, err := db.db.Exec(fmt.Sprintf(`
+		INSERT INTO t_listeners_auth_%s (id, owner, key, name) VALUES ($1, $2, $3, $4);
+	`, db.suffix), k.Id, k.Owner, key, k.Name)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+
+	return key, nil
+}
+
+func (db *ListenersDB) GetKeyExists(key string) (bool, error) {
+	row := db.db.QueryRow(fmt.Sprintf(`
+		SELECT key FROM t_listeners_auth_%s WHERE key = $1;
+	`, db.suffix), key)
+
+	var exists string
+	err := row.Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (db *ListenersDB) RemoveKey(key string) error {
+	_, err := db.db.Exec(fmt.Sprintf(`
+		DELETE FROM t_listeners_auth_%s WHERE key = $1;
+	`, db.suffix), key)
+	if err != nil {
+		return err
+	}
+
+	db.db.Exec(fmt.Sprintf(`
+		DELETE FROM t_listeners_%s WHERE secret = $1;
+	`, db.suffix), key)
 
 	return nil
 }
