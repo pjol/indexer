@@ -237,6 +237,7 @@ func SendListenerEventsForTxs(lsdb *db.ListenersDB, ev *indexer.Event, txs []*in
 				continue
 			}
 		}
+
 		for _, listener := range listeners {
 			switch service := listener.Service; service {
 			case "SQUARE":
@@ -260,9 +261,8 @@ func SendListenerEventsForTxs(lsdb *db.ListenersDB, ev *indexer.Event, txs []*in
 
 			case "ZAPIER":
 				err = lis.SendZapierTransaction(listener, tx)
-				fmt.Println(err)
 				if err != nil {
-					fmt.Println("error sending tx")
+					fmt.Printf("error sending tx: %s\n", err)
 				}
 			}
 		}

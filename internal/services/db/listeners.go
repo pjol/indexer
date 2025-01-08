@@ -91,7 +91,7 @@ func (db *ListenersDB) GetListenerDetails(address string) ([]*indexer.Listener, 
 	rows, err := db.rdb.Query(fmt.Sprintf(`
 		SELECT listener_owner, location_id, contract, token_name, address, service, secret, value
 		FROM t_listeners_%s
-		WHERE address = $1
+		WHERE UPPER(address) = UPPER($1)
 	`, db.suffix), address)
 	if err != nil {
 		return nil, err

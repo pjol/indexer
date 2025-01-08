@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/big"
 	"time"
+	"fmt"
 
 	"github.com/citizenwallet/indexer/internal/services/db"
 	"github.com/citizenwallet/indexer/internal/services/firebase"
@@ -128,6 +129,7 @@ func (i *Indexer) ListenBackground(ctx context.Context) error {
 		go func() {
 			err := i.EventsFromLogStream(ctx, quitAck, ev)
 			if err != nil {
+				fmt.Printf("error in events from log stream: %s\n", err)
 				quitAck <- err
 			}
 		}()

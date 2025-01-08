@@ -39,7 +39,10 @@ func SendZapierTransaction(ls *indexer.Listener, tx *indexer.Transfer) error {
 		return err
 	}
 
+	fmt.Printf("sending zap for address %s\n", tx.To)
+
 	if res.StatusCode != http.StatusOK {
+		fmt.Printf("error: http request rejected with code %d\n", res.StatusCode)
 		fmt.Println(string(body))
 		return fmt.Errorf("error: http request rejected with code %d", res.StatusCode)
 	}
